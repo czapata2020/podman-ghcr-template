@@ -1,0 +1,46 @@
+# compose.prod.yaml
+#
+# Producción: NO construye nada. Referencia imágenes ya publicadas en GHCR.
+# Los marcadores {{OWNER}} y {{PROJECT}} los reemplaza setup.sh.
+# El tag se elige al desplegar:  TAG=sha-xxxxxxx  o  TAG=v1.2.3  (default: latest)
+#
+# Regla de oro: 'image:' (nunca 'build:'), y volúmenes SOLO para datos persistentes.
+
+services:
+  # --- Ejemplo: servicio de un solo contenedor con datos persistentes ---------
+  vault:
+    image: ghcr.io/{{OWNER}}/{{PROJECT}}-vault:${TAG:-latest}
+    ports:
+      - "8200:8200"          # OJO: si corres varios proyectos, cambia el puerto
+    volumes:
+      - vault-data:/data     # datos persistentes: NO borrar en redeploy
+    restart: unless-stopped
+
+  db:
+    image: ghcr.io/{{OWNER}}/{{PROJECT}}-db:${TAG:-latest}
+    ports:
+      - "3001:3001"
+    volumes:
+      - db-data:/data        # datos persistentes: NO borrar en redeploy
+    depends_on:
+      vault:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- App autocontenida: sin volúmenes de código / node_modules --------------
+  app:
+    image: ghcr.io/{{OWNER}}/{{PROJECT}}-app:${TAG:-latest}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  vault-data:
+
+# NOTA: añade los 'healthcheck', 'environment', 'cap_add', etc. que cada servicio
+# necesite (cópialos de tu compose.yaml de desarrollo). Lo único que cambia entre
+# dev y prod es: build -> image, y quitar los volúmenes de código de la app.

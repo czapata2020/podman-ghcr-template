@@ -1,0 +1,47 @@
+# Dockerfile.example  (referencia — renómbralo a 'Dockerfile' y adáptalo)
+#
+# Patrón multi-stage para una app Next.js con output 'standalone'.
+# La clave de producción: el stage 'runner' es AUTOCONTENIDO
+# (código + deps horneados), sin bind mounts ni volúmenes de node_modules.
+#
+# Requisito en next.config.ts:   output: 'standalone'
+
+FROM node:22-alpine AS base
+
+# ── deps: instala dependencias (cacheable mientras no cambie el lockfile) ─────
+FROM base AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+# ── dev: hot-reload para desarrollo local (lo usa compose.yaml, NO el de prod)─
+FROM base AS dev
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
+
+# ── builder: compila la app ──────────────────────────────────────────────────
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# ── runner: imagen final de producción (la que publica el workflow) ──────────
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 nextjs
+# Descomenta si TIENES carpeta public/ con assets:
+# COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+CMD ["node", "server.js"]
